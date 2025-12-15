@@ -8,35 +8,33 @@ import (
 type Task func()
 
 type ThreadPool struct {
-	queue chan Task
-	sem   chan struct{}
-	wg    sync.WaitGroup
+	queue      chan Task
+	numWorkers int
+	wg         sync.WaitGroup
 }
 
-func NewThreadPool(tasksLimit int, threadLimit int) *ThreadPool {
+func NewThreadPool(tasksLimit int, numWorkers int) *ThreadPool {
 	tp := &ThreadPool{
-		queue: make(chan Task, tasksLimit),
-		sem:   make(chan struct{}, threadLimit),
+		queue:      make(chan Task, tasksLimit),
+		numWorkers: numWorkers,
 	}
 	go tp.run()
 	return tp
 }
 
 func (tp *ThreadPool) run() {
-	for id := 0; ; id++ {
-		select {
-		case task := <-tp.queue:
-			tp.sem <- struct{}{}
-			go func(id int) {
-				fmt.Printf("Thread %d acquired\n", id)
-				defer func() {
-					<-tp.sem
-					fmt.Printf("Thread %d released\n", id)
-					tp.wg.Done()
-				}()
-				task()
-			}(id)
-		}
+	for id := 1; id <= tp.numWorkers; id++ {
+		tp.wg.Add(1)
+		go tp.worker(id)
+	}
+}
+
+func (tp *ThreadPool) worker(id int) {
+	defer fmt.Printf("Worker %d Shutdown\n", id)
+	defer tp.wg.Done()
+	for task := range tp.queue {
+		fmt.Printf("Worker %d\n", id)
+		task()
 	}
 }
 
@@ -46,7 +44,6 @@ func (tp *ThreadPool) submit(task Task) {
 		return
 	}
 
-	tp.wg.Add(1)
 	tp.queue <- task
 	fmt.Printf("Pushed new task to Queue, task count: %d\n", len(tp.queue))
 }
@@ -55,10 +52,15 @@ func (tp *ThreadPool) wait() {
 	tp.wg.Wait()
 }
 
+func (tp *ThreadPool) shutdown() {
+	close(tp.queue)
+}
+
 func main() {
 	threadPool := NewThreadPool(10, 2)
-	for i := 0; i < 20; i++ {
-		threadPool.submit(func() { fmt.Printf("====TASK %d=====", i) })
+	for i := range 20 {
+		threadPool.submit(func() { fmt.Printf("TASK %d\n", i) })
 	}
+	threadPool.shutdown()
 	threadPool.wait()
 }
